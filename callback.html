@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Gearbox — Authenticating…</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet"/>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: radial-gradient(ellipse at top left, #0d1b2a 0%, #0a0a0a 60%);
+      color: #fff;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+    }
+    .card {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.12);
+      backdrop-filter: blur(24px);
+      border-radius: 24px;
+      padding: 48px 56px;
+      max-width: 400px;
+    }
+    .spinner {
+      width: 48px; height: 48px;
+      border: 3px solid rgba(255,255,255,0.12);
+      border-top-color: #1db954;
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+      margin: 0 auto 24px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    h2 { font-size: 1.25rem; margin-bottom: 8px; }
+    p { color: rgba(255,255,255,0.55); font-size: 0.9rem; }
+    .error { color: #ff5252; }
+  </style>
+</head>
+<body>
+<div class="card">
+  <div class="spinner" id="spinner"></div>
+  <h2 id="msg">Connecting to Spotify…</h2>
+  <p id="sub">Please wait while we authenticate you.</p>
+</div>
+<script type="module">
+  import { exchangeCode } from './js/auth.js';
+
+  async function handleCallback() {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+    const error = params.get('error');
+
+    const msgEl = document.getElementById('msg');
+    const subEl = document.getElementById('sub');
+    const spinner = document.getElementById('spinner');
+
+    if (error) {
+      spinner.style.display = 'none';
+      msgEl.textContent = 'Authorization denied';
+      msgEl.classList.add('error');
+      subEl.textContent = error;
+      return;
+    }
+
+    if (!code) {
+      spinner.style.display = 'none';
+      msgEl.textContent = 'No authorization code found';
+      msgEl.classList.add('error');
+      subEl.textContent = 'Please try logging in again.';
+      return;
+    }
+
+    try {
+      await exchangeCode(code);
+      msgEl.textContent = '✓ Connected!';
+      subEl.textContent = 'Redirecting to Gearbox…';
+      setTimeout(() => window.location.href = 'index.html', 800);
+    } catch (e) {
+      spinner.style.display = 'none';
+      msgEl.textContent = 'Authentication failed';
+      msgEl.classList.add('error');
+      subEl.textContent = e.message || 'Please try again.';
+    }
+  }
+
+  handleCallback();
+</script>
+</body>
+</html>
