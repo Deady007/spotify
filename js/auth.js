@@ -1,6 +1,6 @@
 // Gearbox — Spotify Auth (PKCE)
 const CLIENT_ID = '0445b9a6e9b74a1aaabafc77c991efba';
-const REDIRECT_URI = 'http://localhost:5500/';
+const REDIRECT_URI = 'https://spotify-five-cyan.vercel.app/';
 const SCOPES = [
   'user-read-private',
   'user-read-email',
