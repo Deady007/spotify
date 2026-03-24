@@ -34,7 +34,7 @@ export async function getMe() {
   return apiFetch('/me');
 }
 
-export async function search(query, types = ['track', 'album', 'artist'], limit = 20) {
+export async function search(query, types = ['track', 'album', 'artist'], limit = 10) {
   // Guard against short queries that Spotify rejects with 400
   if (!query || query.length < 2) return { tracks: { items: [] }, albums: { items: [] }, artists: { items: [] } };
   const params = new URLSearchParams({
