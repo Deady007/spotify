@@ -18,8 +18,13 @@ async function apiFetch(path, opts = {}) {
 
   if (res.status === 401) { logout(); return null; }
   if (res.status === 204 || res.status === 202) return null;
+  if (res.status === 403) {
+    console.warn(`Forbidden: ${path} — check Spotify Developer Dashboard whitelist`);
+    return null;
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
+    console.warn(`API error ${res.status}: ${err?.error?.message || 'Unknown'}`);
     throw new Error(err?.error?.message || `API error ${res.status}`);
   }
   return res.json();

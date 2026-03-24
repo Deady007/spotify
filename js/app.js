@@ -69,6 +69,7 @@ async function init() {
     bindMobileMenu();
     bindFullscreenNP();
     bindInfiniteScroll();
+    bindGlobalArtistLinks();
   } catch (e) {
     console.error(e);
     UI.showToast('Failed to load. Please try again.', 'error');
@@ -185,15 +186,15 @@ async function showSearch(query) {
     const data = await API.search(query, ['track', 'album', 'artist'], 12);
     let html = '';
 
-    if (data.tracks?.items?.length) {
+    if (data?.tracks?.items?.length) {
       const cards = data.tracks.items.map(t => UI.renderTrackCard(t)).join('');
       html += UI.renderSection('Tracks', cards);
     }
-    if (data.albums?.items?.length) {
+    if (data?.albums?.items?.length) {
       const cards = data.albums.items.map(a => UI.renderAlbumCard(a)).join('');
       html += UI.renderSection('Albums', cards);
     }
-    if (data.artists?.items?.length) {
+    if (data?.artists?.items?.length) {
       const cards = data.artists.items.filter(a => a.images?.length).map(a => UI.renderArtistCard(a)).join('');
       html += UI.renderSection('Artists', cards);
     }
@@ -207,6 +208,9 @@ async function showSearch(query) {
     bindCardClicks();
     if (window.__currentTrackUri) UI.highlightActiveTrack(window.__currentTrackUri);
   } catch (e) {
+    console.warn('Search error:', e);
+    const results = document.getElementById('search-results');
+    if (results) results.innerHTML = '<p class="empty">Search failed. Please try again.</p>';
     UI.showToast('Search failed', 'error');
   }
 }
@@ -292,9 +296,15 @@ async function showPlaylist(id) {
       API.getPlaylist(id),
       API.getPlaylistTracks(id, 100),
     ]);
+    if (!pl) {
+      UI.showToast('Cannot access this playlist. Check Spotify Dashboard permissions.', 'error');
+      mainContent().innerHTML = '<p class="empty" style="padding:40px">Unable to load playlist. Your Spotify app may be in Development Mode — add your account to the whitelist in the Spotify Developer Dashboard.</p>';
+      return;
+    }
     state.playlistTracksTotal = pl.tracks?.total || 0;
-    state.playlistTracksOffset = tracks.items.length;
+    state.playlistTracksOffset = tracks?.items?.length || 0;
     const img = UI.getImg(pl.images);
+    const trackItems = tracks?.items || [];
     mainContent().innerHTML = `
       <div class="detail-header glass">
         <img class="detail-header__img" src="${img}" alt="${pl.name}">
@@ -310,17 +320,18 @@ async function showPlaylist(id) {
         </div>
       </div>
       <div class="track-list" id="playlist-track-list">
-        ${tracks.items.map((item, i) => UI.renderTrackRow(item, i, pl.uri)).join('')}
+        ${trackItems.map((item, i) => UI.renderTrackRow(item, i, pl.uri)).join('')}
       </div>`;
     applyPageTransition();
     bindTrackRowClicks(pl.uri);
     bindHeartButtons();
     document.querySelector('.play-all-btn')?.addEventListener('click', () => {
-      if (tracks.items[0]?.track) Player.play(tracks.items[0].track.uri, pl.uri);
+      if (trackItems[0]?.track) Player.play(trackItems[0].track.uri, pl.uri);
     });
     if (window.__currentTrackUri) UI.highlightActiveTrack(window.__currentTrackUri);
     state.view = 'playlist';
   } catch (e) {
+    console.warn('Playlist load error:', e);
     UI.showToast('Failed to load playlist', 'error');
   }
 }
@@ -943,6 +954,21 @@ function greeting() {
   if (h < 12) return 'morning';
   if (h < 17) return 'afternoon';
   return 'evening';
+}
+
+// ─── Global Artist Link Delegation ────────────────────────────────────────────
+function bindGlobalArtistLinks() {
+  // Use event delegation on the entire app so artist links always work
+  // regardless of when they are rendered into the DOM
+  document.body.addEventListener('click', (e) => {
+    const artistLink = e.target.closest('.artist-link');
+    if (artistLink) {
+      e.preventDefault();
+      e.stopPropagation();
+      const artistId = artistLink.dataset.id;
+      if (artistId) showArtist(artistId);
+    }
+  });
 }
 
 // ─── Start ────────────────────────────────────────────────────────────────────
