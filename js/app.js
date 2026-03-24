@@ -357,7 +357,11 @@ function startProgressTracking(state) {
 // ─── Bindings ─────────────────────────────────────────────────────────────────
 function bindNav() {
   document.getElementById('nav-home')?.addEventListener('click', showHome);
-  document.getElementById('nav-search')?.addEventListener('click', () => showSearch(''));
+  document.getElementById('nav-search')?.addEventListener('click', () => {
+    const input = document.getElementById('search-input');
+    showSearch(input?.value.trim() || '');
+    input?.focus();
+  });
   document.getElementById('nav-library')?.addEventListener('click', showLibrary);
   document.getElementById('nav-liked')?.addEventListener('click', showLikedSongs);
   document.getElementById('nav-logout')?.addEventListener('click', logout);
@@ -375,7 +379,10 @@ function bindSearch() {
   });
   input.addEventListener('input', () => {
     clearTimeout(debounce);
-    if (!input.value.trim()) return;
+    if (!input.value.trim()) {
+      showSearch('');
+      return;
+    }
     debounce = setTimeout(() => showSearch(input.value.trim()), 600);
   });
   document.getElementById('search-btn')?.addEventListener('click', () => showSearch(input.value.trim()));
