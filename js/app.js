@@ -10,6 +10,12 @@ const state = {
   view: 'home',
   playbackState: null,
   progressInterval: null,
+  likedSongsOffset: 0,
+  likedSongsTotal: 0,
+  isLoadingMore: false,
+  playlistTracksOffset: 0,
+  playlistTracksTotal: 0,
+  currentPlaylistId: null,
 };
 
 // ─── Elements ─────────────────────────────────────────────────────────────────
@@ -24,7 +30,6 @@ async function init() {
   const error = params.get('error');
 
   if (error) {
-    // User denied authorization
     history.replaceState({}, '', '/');
     renderLogin();
     setTimeout(() => UI.showToast('Authorization denied: ' + error, 'error'), 300);
@@ -32,7 +37,6 @@ async function init() {
   }
 
   if (code) {
-    // Exchange auth code for tokens
     try {
       const { exchangeCode } = await import('./auth.js');
       await exchangeCode(code);
@@ -42,7 +46,6 @@ async function init() {
       setTimeout(() => UI.showToast('Login failed. Please try again.', 'error'), 300);
       return;
     }
-    // Clean the URL so code doesn't persist on refresh
     history.replaceState({}, '', '/');
   }
 
@@ -61,6 +64,11 @@ async function init() {
     bindNav();
     bindSearch();
     bindNowPlaying();
+    bindKeyboard();
+    bindContextMenu();
+    bindMobileMenu();
+    bindFullscreenNP();
+    bindInfiniteScroll();
   } catch (e) {
     console.error(e);
     UI.showToast('Failed to load. Please try again.', 'error');
@@ -104,10 +112,18 @@ function renderLogin() {
   document.getElementById('login-btn').addEventListener('click', login);
 }
 
+function applyPageTransition() {
+  const mc = mainContent();
+  mc.classList.remove('page-enter');
+  void mc.offsetWidth; // force reflow
+  mc.classList.add('page-enter');
+}
+
 async function showHome() {
   setActiveNav('home');
   mainContent().innerHTML = `<div class="page-header"><h1>Good ${greeting()}, ${state.user?.display_name?.split(' ')[0] || 'there'} 👋</h1></div>
     <div id="home-content">${UI.skeletonCards(8)}</div>`;
+  applyPageTransition();
 
   const [recent, topTracks, topArtists, playlists] = await Promise.allSettled([
     API.getRecentlyPlayed(10),
@@ -135,24 +151,35 @@ async function showHome() {
     html += UI.renderSection('Your Playlists', cards);
   }
 
-  document.getElementById('home-content').innerHTML = html || '<p class="empty">No data yet. Start listening on Spotify!</p>';
+  const homeContent = document.getElementById('home-content');
+  if (homeContent) {
+    homeContent.innerHTML = html || '<p class="empty">No data yet. Start listening on Spotify!</p>';
+    homeContent.classList.add('content-loaded');
+  }
   bindCardClicks();
+  // Highlight active track if playing
+  if (window.__currentTrackUri) UI.highlightActiveTrack(window.__currentTrackUri);
 }
 
 async function showSearch(query) {
   if (!query) {
+    setActiveNav('search');
     mainContent().innerHTML = `
       <div class="page-header"><h1>Search</h1></div>
+      ${UI.renderRecentSearches()}
       <div class="search-empty">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="64" height="64">
           <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
         </svg>
         <p>Find tracks, albums, and artists</p>
       </div>`;
+    applyPageTransition();
+    bindRecentSearchChips();
     return;
   }
   setActiveNav('search');
   mainContent().innerHTML = `<div class="page-header search-header"><h1>Results for "${query}"</h1></div><div id="search-results">${UI.skeletonCards(12)}</div>`;
+  applyPageTransition();
 
   try {
     const data = await API.search(query, ['track', 'album', 'artist'], 12);
@@ -171,8 +198,14 @@ async function showSearch(query) {
       html += UI.renderSection('Artists', cards);
     }
 
-    document.getElementById('search-results').innerHTML = html || '<p class="empty">No results found.</p>';
+    const results = document.getElementById('search-results');
+    if (results) {
+      results.innerHTML = html || '<p class="empty">No results found.</p>';
+      results.classList.add('content-loaded');
+    }
+    UI.addRecentSearch(query);
     bindCardClicks();
+    if (window.__currentTrackUri) UI.highlightActiveTrack(window.__currentTrackUri);
   } catch (e) {
     UI.showToast('Search failed', 'error');
   }
@@ -181,6 +214,7 @@ async function showSearch(query) {
 async function showLibrary() {
   setActiveNav('library');
   mainContent().innerHTML = `<div class="page-header"><h1>Your Library</h1></div><div id="library-content">${UI.skeletonCards(8)}</div>`;
+  applyPageTransition();
 
   const [playlists, liked] = await Promise.allSettled([
     API.getMyPlaylists(50),
@@ -211,36 +245,55 @@ async function showLibrary() {
       </section>` + html;
   }
 
-  document.getElementById('library-content').innerHTML = html;
+  const libraryContent = document.getElementById('library-content');
+  if (libraryContent) {
+    libraryContent.innerHTML = html;
+    libraryContent.classList.add('content-loaded');
+  }
   bindCardClicks();
   document.getElementById('go-liked')?.addEventListener('click', showLikedSongs);
 }
 
 async function showLikedSongs() {
+  state.likedSongsOffset = 0;
   mainContent().innerHTML = `
     <div class="page-header liked-header">
       <div class="liked-hero">💜</div>
       <div><h1>Liked Songs</h1><p class="page-header__sub">Your saved tracks</p></div>
     </div>
     <div id="liked-tracks">${UI.skeletonCards(10)}</div>`;
+  applyPageTransition();
 
   try {
     const data = await API.getLikedSongs(50);
+    state.likedSongsTotal = data.total || 0;
+    state.likedSongsOffset = data.items.length;
     const rows = data.items.map((item, i) => UI.renderTrackRow(item, i)).join('');
-    document.getElementById('liked-tracks').innerHTML = `<div class="track-list">${rows || '<p class="empty">No liked songs yet.</p>'}</div>`;
+    const likedTracks = document.getElementById('liked-tracks');
+    if (likedTracks) {
+      likedTracks.innerHTML = `<div class="track-list" id="liked-track-list">${rows || '<p class="empty">No liked songs yet.</p>'}</div>`;
+      likedTracks.classList.add('content-loaded');
+    }
     bindTrackRowClicks();
+    bindHeartButtons();
+    if (window.__currentTrackUri) UI.highlightActiveTrack(window.__currentTrackUri);
+    state.view = 'liked';
   } catch (e) {
     UI.showToast('Failed to load liked songs', 'error');
   }
 }
 
 async function showPlaylist(id) {
+  state.currentPlaylistId = id;
+  state.playlistTracksOffset = 0;
   mainContent().innerHTML = `<div class="loader-center"><div class="spinner"></div></div>`;
   try {
     const [pl, tracks] = await Promise.all([
       API.getPlaylist(id),
       API.getPlaylistTracks(id, 100),
     ]);
+    state.playlistTracksTotal = pl.tracks?.total || 0;
+    state.playlistTracksOffset = tracks.items.length;
     const img = UI.getImg(pl.images);
     mainContent().innerHTML = `
       <div class="detail-header glass">
@@ -256,13 +309,17 @@ async function showPlaylist(id) {
           </button>
         </div>
       </div>
-      <div class="track-list">
+      <div class="track-list" id="playlist-track-list">
         ${tracks.items.map((item, i) => UI.renderTrackRow(item, i, pl.uri)).join('')}
       </div>`;
+    applyPageTransition();
     bindTrackRowClicks(pl.uri);
+    bindHeartButtons();
     document.querySelector('.play-all-btn')?.addEventListener('click', () => {
       if (tracks.items[0]?.track) Player.play(tracks.items[0].track.uri, pl.uri);
     });
+    if (window.__currentTrackUri) UI.highlightActiveTrack(window.__currentTrackUri);
+    state.view = 'playlist';
   } catch (e) {
     UI.showToast('Failed to load playlist', 'error');
   }
@@ -290,14 +347,17 @@ async function showAlbum(id) {
       </div>
       <div class="track-list">
         ${album.tracks.items.map((t, i) => {
-          t.album = album; // inject for row renderer
+          t.album = album;
           return UI.renderTrackRow({ track: t }, i, album.uri);
         }).join('')}
       </div>`;
+    applyPageTransition();
     bindTrackRowClicks(album.uri);
+    bindHeartButtons();
     document.querySelector('.play-all-btn')?.addEventListener('click', () => {
       if (album.tracks.items[0]) Player.play(album.tracks.items[0].uri, album.uri);
     });
+    if (window.__currentTrackUri) UI.highlightActiveTrack(window.__currentTrackUri);
   } catch (e) {
     UI.showToast('Failed to load album', 'error');
   }
@@ -323,48 +383,100 @@ async function showArtist(id) {
         ${UI.renderSection('Top Tracks', topTracks.tracks?.slice(0, 8).map((t, i) => UI.renderTrackRow({ track: t }, i)).join('') || '', 'section--list')}
         ${UI.renderSection('Albums', albums.items?.map(a => UI.renderAlbumCard(a)).join('') || '')}
       </div>`;
+    applyPageTransition();
     bindTrackRowClicks();
     bindCardClicks();
+    bindHeartButtons();
+    if (window.__currentTrackUri) UI.highlightActiveTrack(window.__currentTrackUri);
   } catch (e) {
     UI.showToast('Failed to load artist', 'error');
   }
 }
 
 // ─── Playback ─────────────────────────────────────────────────────────────────
-function handlePlaybackState(state) {
-  if (!state) return;
-  state.playbackState = state;
-  UI.updateNowPlaying(state);
-  startProgressTracking(state);
+function handlePlaybackState(pbState) {
+  if (!pbState) return;
+  state.playbackState = pbState;
+  UI.updateNowPlaying(pbState);
+  startProgressTracking(pbState);
+  updateShuffleRepeatUI();
+
+  // Check if current track is saved
+  const track = pbState.track_window?.current_track;
+  if (track?.id) {
+    API.isTrackSaved(track.id).then(saved => {
+      const btn = document.getElementById('np-heart-btn');
+      if (btn) {
+        btn.classList.toggle('saved', saved);
+        btn.innerHTML = saved ? UI.icons.heartFilled : UI.icons.heartOutline;
+      }
+    }).catch(() => {});
+  }
 }
 
-function startProgressTracking(state) {
+function startProgressTracking(pbState) {
   clearInterval(window._progressInterval);
-  if (state.paused) return;
-  let pos = state.position;
-  const dur = state.duration;
+  if (pbState.paused) return;
+  let pos = pbState.position;
+  const dur = pbState.duration;
   window._progressInterval = setInterval(() => {
     pos += 500;
     if (pos >= dur) { clearInterval(window._progressInterval); return; }
     const pct = (pos / dur) * 100;
     const bar = document.getElementById('np-progress');
+    const thumb = document.getElementById('np-thumb');
     const cur = document.getElementById('np-time-cur');
     if (bar) bar.style.width = `${pct}%`;
+    if (thumb) thumb.style.left = `${pct}%`;
     if (cur) cur.textContent = UI.formatDuration(pos);
+    // Update fullscreen NP if open
+    const fsFill = document.querySelector('.fs-np__progress-fill');
+    const fsCur = document.querySelector('.fs-np__time-cur');
+    if (fsFill) fsFill.style.width = `${pct}%`;
+    if (fsCur) fsCur.textContent = UI.formatDuration(pos);
   }, 500);
+}
+
+function updateShuffleRepeatUI() {
+  const shuffleOn = Player.getShuffleState();
+  const repeatMode = Player.getRepeatMode();
+
+  const shuffleBtn = document.getElementById('np-shuffle-btn');
+  const repeatBtn = document.getElementById('np-repeat-btn');
+  const fsShuffleBtn = document.getElementById('fs-shuffle-btn');
+  const fsRepeatBtn = document.getElementById('fs-repeat-btn');
+
+  if (shuffleBtn) shuffleBtn.classList.toggle('active', shuffleOn);
+  if (fsShuffleBtn) fsShuffleBtn.classList.toggle('active', shuffleOn);
+
+  if (repeatBtn) {
+    repeatBtn.classList.toggle('active', repeatMode !== 'off');
+    if (repeatMode === 'track') {
+      repeatBtn.title = 'Repeat: Track';
+    } else if (repeatMode === 'context') {
+      repeatBtn.title = 'Repeat: All';
+    } else {
+      repeatBtn.title = 'Repeat: Off';
+    }
+  }
+  if (fsRepeatBtn) {
+    fsRepeatBtn.classList.toggle('active', repeatMode !== 'off');
+  }
 }
 
 // ─── Bindings ─────────────────────────────────────────────────────────────────
 function bindNav() {
-  document.getElementById('nav-home')?.addEventListener('click', showHome);
-  document.getElementById('nav-search')?.addEventListener('click', () => {
+  document.getElementById('nav-home')?.addEventListener('click', e => { e.preventDefault(); showHome(); closeMobileMenu(); });
+  document.getElementById('nav-search')?.addEventListener('click', e => {
+    e.preventDefault();
     const input = document.getElementById('search-input');
     showSearch(input?.value.trim() || '');
     input?.focus();
+    closeMobileMenu();
   });
-  document.getElementById('nav-library')?.addEventListener('click', showLibrary);
-  document.getElementById('nav-liked')?.addEventListener('click', showLikedSongs);
-  document.getElementById('nav-logout')?.addEventListener('click', logout);
+  document.getElementById('nav-library')?.addEventListener('click', e => { e.preventDefault(); showLibrary(); closeMobileMenu(); });
+  document.getElementById('nav-liked')?.addEventListener('click', e => { e.preventDefault(); showLikedSongs(); closeMobileMenu(); });
+  document.getElementById('nav-logout')?.addEventListener('click', e => { e.preventDefault(); logout(); });
 }
 
 function bindSearch() {
@@ -393,14 +505,98 @@ function bindNowPlaying() {
   document.getElementById('np-next-btn')?.addEventListener('click', Player.next);
   document.getElementById('np-prev-btn')?.addEventListener('click', Player.prev);
 
-  const vol = document.getElementById('np-volume');
-  vol?.addEventListener('input', () => Player.setVolume(vol.value / 100));
+  // Shuffle & Repeat
+  document.getElementById('np-shuffle-btn')?.addEventListener('click', async () => {
+    await Player.toggleShuffle();
+    updateShuffleRepeatUI();
+    UI.showToast(Player.getShuffleState() ? 'Shuffle on' : 'Shuffle off', 'success');
+  });
+  document.getElementById('np-repeat-btn')?.addEventListener('click', async () => {
+    await Player.cycleRepeat();
+    updateShuffleRepeatUI();
+    const mode = Player.getRepeatMode();
+    UI.showToast(`Repeat: ${mode === 'off' ? 'Off' : mode === 'context' ? 'All' : 'Track'}`, 'success');
+  });
 
+  // Heart on NP bar
+  document.getElementById('np-heart-btn')?.addEventListener('click', async () => {
+    const trackId = window.__currentTrackId;
+    if (!trackId) return;
+    const btn = document.getElementById('np-heart-btn');
+    const isSaved = btn?.classList.contains('saved');
+    try {
+      if (isSaved) {
+        await API.removeTrack(trackId);
+        btn.classList.remove('saved');
+        btn.innerHTML = UI.icons.heartOutline;
+        UI.showToast('Removed from Liked Songs', 'success');
+      } else {
+        await API.saveTrack(trackId);
+        btn.classList.add('saved');
+        btn.innerHTML = UI.icons.heartFilled;
+        UI.showToast('Added to Liked Songs', 'success');
+      }
+    } catch (e) {
+      UI.showToast('Failed to update', 'error');
+    }
+  });
+
+  // Volume
+  const vol = document.getElementById('np-volume');
+  vol?.addEventListener('input', () => {
+    Player.setVolume(vol.value / 100);
+    UI.updateVolumeIcon(parseInt(vol.value));
+  });
+  // Init volume icon
+  UI.updateVolumeIcon(70);
+
+  // Drag-to-seek on progress bar
+  bindProgressDrag();
+
+  // Album art click → expand fullscreen NP
+  document.getElementById('np-img')?.addEventListener('click', () => openFullscreenNP());
+  document.getElementById('np-expand-btn')?.addEventListener('click', () => openFullscreenNP());
+}
+
+function bindProgressDrag() {
   const track = document.getElementById('np-track');
-  track?.addEventListener('click', e => {
+  if (!track) return;
+  let isDragging = false;
+
+  const seekToPosition = (e) => {
     const rect = track.getBoundingClientRect();
-    const pct = (e.clientX - rect.left) / rect.width;
-    Player.getCurrentState().then(s => { if (s) Player.seekTo(pct * s.duration); });
+    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    Player.getCurrentState().then(s => {
+      if (s) Player.seekTo(pct * s.duration);
+    });
+    // Update visual immediately
+    const bar = document.getElementById('np-progress');
+    const thumb = document.getElementById('np-thumb');
+    if (bar) bar.style.width = `${pct * 100}%`;
+    if (thumb) thumb.style.left = `${pct * 100}%`;
+  };
+
+  track.addEventListener('mousedown', (e) => {
+    isDragging = true;
+    track.classList.add('dragging');
+    seekToPosition(e);
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!isDragging) return;
+    const rect = track.getBoundingClientRect();
+    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const bar = document.getElementById('np-progress');
+    const thumb = document.getElementById('np-thumb');
+    if (bar) bar.style.width = `${pct * 100}%`;
+    if (thumb) thumb.style.left = `${pct * 100}%`;
+  });
+
+  document.addEventListener('mouseup', (e) => {
+    if (!isDragging) return;
+    isDragging = false;
+    track.classList.remove('dragging');
+    seekToPosition(e);
   });
 }
 
@@ -412,6 +608,8 @@ function bindCardClicks() {
         API.getPlaylistTracks(id).then(data => {
           if (data.items[0]?.track) Player.play(data.items[0].track.uri, `spotify:playlist:${id}`);
         });
+      } else if (e.target.closest('.play-all-btn')) {
+        return; // handled separately
       } else {
         showPlaylist(id);
       }
@@ -419,6 +617,7 @@ function bindCardClicks() {
   });
 
   document.querySelectorAll('[data-album-id]').forEach(el => {
+    if (el.closest('.track-row')) return; // skip track rows with album-id
     el.addEventListener('click', e => {
       const id = el.dataset.albumId;
       if (e.target.closest('.card__play-btn')) {
@@ -432,13 +631,13 @@ function bindCardClicks() {
   });
 
   document.querySelectorAll('[data-artist-id]').forEach(el => {
-    el.addEventListener('click', e => {
-      const id = el.dataset.artistId;
-      showArtist(id);
+    if (el.closest('.track-row')) return;
+    el.addEventListener('click', () => {
+      showArtist(el.dataset.artistId);
     });
   });
 
-  document.querySelectorAll('[data-uri]').forEach(el => {
+  document.querySelectorAll('.card[data-uri]').forEach(el => {
     el.addEventListener('click', e => {
       if (e.target.closest('.card__play-btn') || e.target.closest('.card')) {
         const uri = el.dataset.uri;
@@ -458,7 +657,9 @@ function bindCardClicks() {
 
 function bindTrackRowClicks(contextUri = null) {
   document.querySelectorAll('.track-row').forEach(row => {
-    row.addEventListener('click', () => {
+    row.addEventListener('click', (e) => {
+      // Don't play if clicking heart or artist link
+      if (e.target.closest('.heart-btn') || e.target.closest('.artist-link')) return;
       const uri = row.dataset.uri;
       const ctx = row.dataset.ctx || contextUri || null;
       if (uri) Player.play(uri, ctx);
@@ -466,8 +667,261 @@ function bindTrackRowClicks(contextUri = null) {
   });
 }
 
+function bindHeartButtons() {
+  document.querySelectorAll('.heart-btn:not(.np-heart-btn)').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const trackId = btn.dataset.trackId;
+      if (!trackId) return;
+      const isSaved = btn.classList.contains('saved');
+      try {
+        if (isSaved) {
+          await API.removeTrack(trackId);
+          btn.classList.remove('saved');
+          btn.innerHTML = UI.icons.heartOutline;
+          UI.showToast('Removed from Liked Songs', 'success');
+        } else {
+          await API.saveTrack(trackId);
+          btn.classList.add('saved');
+          btn.innerHTML = UI.icons.heartFilled;
+          UI.showToast('Added to Liked Songs', 'success');
+        }
+      } catch (e) {
+        UI.showToast('Failed to update', 'error');
+      }
+    });
+  });
+}
+
+function bindRecentSearchChips() {
+  document.querySelectorAll('.search-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const query = chip.dataset.query;
+      const input = document.getElementById('search-input');
+      if (input) input.value = query;
+      showSearch(query);
+    });
+  });
+}
+
+// ─── Keyboard Shortcuts ───────────────────────────────────────────────────────
+function bindKeyboard() {
+  document.addEventListener('keydown', (e) => {
+    // Don't capture when typing in search
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+      if (e.key === 'Escape') e.target.blur();
+      return;
+    }
+
+    switch (e.key) {
+      case ' ':
+        e.preventDefault();
+        Player.togglePlay();
+        break;
+      case 'ArrowRight':
+        e.preventDefault();
+        Player.next();
+        break;
+      case 'ArrowLeft':
+        e.preventDefault();
+        Player.prev();
+        break;
+      case '/':
+        e.preventDefault();
+        document.getElementById('search-input')?.focus();
+        break;
+      case 'Escape':
+        closeFullscreenNP();
+        UI.removeContextMenu();
+        break;
+      case 'f':
+        if (document.getElementById('fullscreen-np')?.classList.contains('active')) {
+          closeFullscreenNP();
+        } else {
+          openFullscreenNP();
+        }
+        break;
+    }
+  });
+}
+
+// ─── Context Menu ─────────────────────────────────────────────────────────────
+function bindContextMenu() {
+  document.addEventListener('contextmenu', (e) => {
+    const row = e.target.closest('.track-row');
+    const card = e.target.closest('.card[data-uri]');
+    const target = row || card;
+    if (!target) {
+      UI.removeContextMenu();
+      return;
+    }
+    e.preventDefault();
+    const trackData = {
+      uri: target.dataset.uri,
+      trackId: target.dataset.trackId,
+      albumId: target.dataset.albumId,
+      artistIds: target.dataset.artistIds,
+    };
+    const menu = UI.renderContextMenu(e.clientX, e.clientY, trackData);
+
+    // Bind menu actions
+    menu.querySelectorAll('.ctx-menu__item').forEach(item => {
+      item.addEventListener('click', () => {
+        const action = item.dataset.action;
+        switch (action) {
+          case 'queue':
+            Player.addToQueue(item.dataset.uri).then(() => {
+              UI.showToast('Added to queue', 'success');
+            }).catch(() => {
+              UI.showToast('Failed to add to queue', 'error');
+            });
+            break;
+          case 'album':
+            showAlbum(item.dataset.id);
+            break;
+          case 'artist':
+            showArtist(item.dataset.id);
+            break;
+          case 'save':
+            API.saveTrack(item.dataset.trackId).then(() => {
+              UI.showToast('Saved to library', 'success');
+            }).catch(() => {
+              UI.showToast('Failed to save', 'error');
+            });
+            break;
+        }
+        UI.removeContextMenu();
+      });
+    });
+  });
+
+  // Close context menu on click outside
+  document.addEventListener('click', () => UI.removeContextMenu());
+}
+
+// ─── Mobile Menu ──────────────────────────────────────────────────────────────
+function bindMobileMenu() {
+  document.getElementById('hamburger-btn')?.addEventListener('click', () => {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebar-overlay');
+    sidebar?.classList.toggle('mobile-open');
+    overlay?.classList.toggle('active');
+  });
+
+  document.getElementById('sidebar-overlay')?.addEventListener('click', closeMobileMenu);
+}
+
+function closeMobileMenu() {
+  document.getElementById('sidebar')?.classList.remove('mobile-open');
+  document.getElementById('sidebar-overlay')?.classList.remove('active');
+}
+
+// ─── Fullscreen Now Playing ───────────────────────────────────────────────────
+function bindFullscreenNP() {
+  document.getElementById('fs-np-close')?.addEventListener('click', closeFullscreenNP);
+  document.getElementById('fs-play-btn')?.addEventListener('click', Player.togglePlay);
+  document.getElementById('fs-prev-btn')?.addEventListener('click', Player.prev);
+  document.getElementById('fs-next-btn')?.addEventListener('click', Player.next);
+  document.getElementById('fs-shuffle-btn')?.addEventListener('click', async () => {
+    await Player.toggleShuffle();
+    updateShuffleRepeatUI();
+  });
+  document.getElementById('fs-repeat-btn')?.addEventListener('click', async () => {
+    await Player.cycleRepeat();
+    updateShuffleRepeatUI();
+  });
+}
+
+function openFullscreenNP() {
+  const overlay = document.getElementById('fullscreen-np');
+  if (!overlay) return;
+  overlay.classList.add('active');
+  // Update with current state
+  if (state.playbackState) {
+    UI.updateFullscreenNP(state.playbackState);
+    updateShuffleRepeatUI();
+  }
+}
+
+function closeFullscreenNP() {
+  document.getElementById('fullscreen-np')?.classList.remove('active');
+}
+
+// ─── Infinite Scroll ──────────────────────────────────────────────────────────
+function bindInfiniteScroll() {
+  const mc = mainContent();
+  if (!mc) return;
+  mc.addEventListener('scroll', async () => {
+    if (state.isLoadingMore) return;
+    const { scrollTop, scrollHeight, clientHeight } = mc;
+    if (scrollTop + clientHeight < scrollHeight - 200) return; // not near bottom
+
+    if (state.view === 'liked' && state.likedSongsOffset < state.likedSongsTotal) {
+      await loadMoreLikedSongs();
+    }
+    if (state.view === 'playlist' && state.playlistTracksOffset < state.playlistTracksTotal) {
+      await loadMorePlaylistTracks();
+    }
+  });
+}
+
+async function loadMoreLikedSongs() {
+  state.isLoadingMore = true;
+  const list = document.getElementById('liked-track-list');
+  if (!list) { state.isLoadingMore = false; return; }
+
+  // Add loading indicator
+  const loader = document.createElement('div');
+  loader.className = 'loading-more';
+  loader.textContent = 'Loading more...';
+  list.appendChild(loader);
+
+  try {
+    const data = await API.getLikedSongs(50, state.likedSongsOffset);
+    const rows = data.items.map((item, i) => UI.renderTrackRow(item, i + state.likedSongsOffset)).join('');
+    loader.remove();
+    list.insertAdjacentHTML('beforeend', rows);
+    state.likedSongsOffset += data.items.length;
+    bindTrackRowClicks();
+    bindHeartButtons();
+    if (window.__currentTrackUri) UI.highlightActiveTrack(window.__currentTrackUri);
+  } catch (e) {
+    loader.remove();
+    UI.showToast('Failed to load more', 'error');
+  }
+  state.isLoadingMore = false;
+}
+
+async function loadMorePlaylistTracks() {
+  state.isLoadingMore = true;
+  const list = document.getElementById('playlist-track-list');
+  if (!list || !state.currentPlaylistId) { state.isLoadingMore = false; return; }
+
+  const loader = document.createElement('div');
+  loader.className = 'loading-more';
+  loader.textContent = 'Loading more...';
+  list.appendChild(loader);
+
+  try {
+    const pl = await API.getPlaylist(state.currentPlaylistId);
+    const data = await API.getPlaylistTracks(state.currentPlaylistId, 100, state.playlistTracksOffset);
+    const rows = data.items.map((item, i) => UI.renderTrackRow(item, i + state.playlistTracksOffset, pl.uri)).join('');
+    loader.remove();
+    list.insertAdjacentHTML('beforeend', rows);
+    state.playlistTracksOffset += data.items.length;
+    bindTrackRowClicks(pl.uri);
+    bindHeartButtons();
+    if (window.__currentTrackUri) UI.highlightActiveTrack(window.__currentTrackUri);
+  } catch (e) {
+    loader.remove();
+    UI.showToast('Failed to load more', 'error');
+  }
+  state.isLoadingMore = false;
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function setActiveNav(id) {
+  state.view = id;
   document.querySelectorAll('.nav-link').forEach(el => el.classList.remove('active'));
   document.getElementById(`nav-${id}`)?.classList.add('active');
 }

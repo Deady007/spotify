@@ -12,6 +12,18 @@
 <body>
 <div id="app">
 
+  <!-- Mobile Hamburger -->
+  <button class="hamburger-btn" id="hamburger-btn" title="Menu">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" width="22" height="22">
+      <line x1="3" y1="6" x2="21" y2="6"/>
+      <line x1="3" y1="12" x2="21" y2="12"/>
+      <line x1="3" y1="18" x2="21" y2="18"/>
+    </svg>
+  </button>
+
+  <!-- Sidebar Overlay (mobile) -->
+  <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
   <!-- Sidebar -->
   <aside class="sidebar glass" id="sidebar">
     <div class="sidebar__logo">
@@ -74,6 +86,14 @@
 
     <div class="sidebar__spacer"></div>
 
+    <!-- Keyboard shortcuts hint -->
+    <div class="sidebar__shortcuts glass-subtle">
+      <p class="shortcuts-label">Shortcuts</p>
+      <div class="shortcut-row"><kbd>Space</kbd> Play/Pause</div>
+      <div class="shortcut-row"><kbd>←</kbd><kbd>→</kbd> Prev/Next</div>
+      <div class="shortcut-row"><kbd>/</kbd> Search</div>
+    </div>
+
     <!-- User -->
     <div class="sidebar__user glass-subtle">
       <img id="user-avatar" src="assets/placeholder.png" alt="Avatar" class="user-avatar"/>
@@ -96,14 +116,26 @@
   <!-- Now Playing Bar -->
   <div class="np-bar glass" id="np-bar">
     <div class="np-bar__track-info">
-      <img id="np-img" src="" alt="" class="np-bar__art"/>
+      <img id="np-img" src="" alt="" class="np-bar__art" id="np-art-clickable" title="Expand Now Playing"/>
       <div class="np-bar__meta">
         <p id="np-title" class="np-bar__title">—</p>
         <p id="np-artist" class="np-bar__artist">—</p>
       </div>
+      <button class="heart-btn btn-icon np-heart-btn" id="np-heart-btn" title="Save to Library">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+          <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 0 0 0-7.78z"/>
+        </svg>
+      </button>
     </div>
 
     <div class="np-bar__controls">
+      <button id="np-shuffle-btn" class="btn-icon np-ctrl-btn" title="Shuffle">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16">
+          <polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/>
+          <polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/>
+          <line x1="4" y1="4" x2="9" y2="9"/>
+        </svg>
+      </button>
       <button id="np-prev-btn" class="btn-icon" title="Previous">
         <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
           <polygon points="19,20 9,12 19,4"/><rect x="5" y="4" width="2" height="16"/>
@@ -119,6 +151,12 @@
           <polygon points="5,4 15,12 5,20"/><rect x="17" y="4" width="2" height="16"/>
         </svg>
       </button>
+      <button id="np-repeat-btn" class="btn-icon np-ctrl-btn" title="Repeat">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16">
+          <polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/>
+          <polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+        </svg>
+      </button>
     </div>
 
     <div class="np-bar__progress-wrap">
@@ -126,20 +164,84 @@
       <div class="np-track" id="np-track">
         <div class="np-track__bg">
           <div class="np-track__fill" id="np-progress"></div>
+          <div class="np-track__thumb" id="np-thumb"></div>
         </div>
       </div>
       <span id="np-time-dur" class="np-time">0:00</span>
     </div>
 
     <div class="np-bar__volume">
-      <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
-        <polygon points="11,5 6,9 2,9 2,15 6,15 11,19"/>
-        <path d="M15.54 8.46a5 5 0 0 1 0 7.07M19.07 4.93a10 10 0 0 1 0 14.14"/>
-      </svg>
+      <button class="btn-icon" id="np-volume-icon">
+        <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
+          <polygon points="11,5 6,9 2,9 2,15 6,15 11,19"/>
+          <path d="M15.54 8.46a5 5 0 0 1 0 7.07M19.07 4.93a10 10 0 0 1 0 14.14"/>
+        </svg>
+      </button>
       <input type="range" id="np-volume" min="0" max="100" value="70" class="volume-slider"/>
     </div>
+
+    <button class="btn-icon np-expand-btn" id="np-expand-btn" title="Expand">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" width="16" height="16">
+        <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/>
+        <line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
+      </svg>
+    </button>
   </div>
 
+</div>
+
+<!-- Fullscreen Now Playing Overlay -->
+<div class="fullscreen-np" id="fullscreen-np">
+  <div class="fs-np__bg" id="fs-np-bg"></div>
+  <button class="btn-icon fs-np__close" id="fs-np-close" title="Close">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" width="24" height="24">
+      <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+    </svg>
+  </button>
+  <div class="fs-np__content">
+    <img class="fs-np__img" src="" alt="Album Art"/>
+    <div class="fs-np__info">
+      <h2 class="fs-np__title">—</h2>
+      <p class="fs-np__artist">—</p>
+    </div>
+    <div class="fs-np__progress">
+      <span class="fs-np__time-cur">0:00</span>
+      <div class="fs-np__progress-track">
+        <div class="fs-np__progress-fill"></div>
+      </div>
+      <span class="fs-np__time-dur">0:00</span>
+    </div>
+    <div class="fs-np__controls">
+      <button class="btn-icon fs-np__shuffle" id="fs-shuffle-btn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20">
+          <polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/>
+          <polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/>
+          <line x1="4" y1="4" x2="9" y2="9"/>
+        </svg>
+      </button>
+      <button class="btn-icon fs-np__prev" id="fs-prev-btn">
+        <svg viewBox="0 0 24 24" fill="currentColor" width="28" height="28">
+          <polygon points="19,20 9,12 19,4"/><rect x="5" y="4" width="2" height="16"/>
+        </svg>
+      </button>
+      <button class="btn-play fs-np__play" id="fs-play-btn">
+        <span class="fs-np__play-icon">
+          <svg viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
+        </span>
+      </button>
+      <button class="btn-icon fs-np__next" id="fs-next-btn">
+        <svg viewBox="0 0 24 24" fill="currentColor" width="28" height="28">
+          <polygon points="5,4 15,12 5,20"/><rect x="17" y="4" width="2" height="16"/>
+        </svg>
+      </button>
+      <button class="btn-icon fs-np__repeat" id="fs-repeat-btn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20">
+          <polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/>
+          <polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+        </svg>
+      </button>
+    </div>
+  </div>
 </div>
 
 <div id="toast" class="toast"></div>

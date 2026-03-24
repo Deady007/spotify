@@ -4,12 +4,16 @@ import * as API from './spotify.js';
 let player = null;
 let deviceId = null;
 let onStateChange = null;
+let shuffleState = false;
+let repeatMode = 'off'; // off → context → track
 
 export function setStateChangeCallback(fn) {
   onStateChange = fn;
 }
 
 export function getDeviceId() { return deviceId; }
+export function getShuffleState() { return shuffleState; }
+export function getRepeatMode() { return repeatMode; }
 
 export function initPlayer(token) {
   return new Promise((resolve) => {
@@ -87,6 +91,24 @@ export async function seekTo(ms) {
 export async function getCurrentState() {
   if (!player) return null;
   return player.getCurrentState();
+}
+
+export async function toggleShuffle() {
+  shuffleState = !shuffleState;
+  await API.toggleShuffle(shuffleState);
+  return shuffleState;
+}
+
+export async function cycleRepeat() {
+  const modes = ['off', 'context', 'track'];
+  const idx = (modes.indexOf(repeatMode) + 1) % modes.length;
+  repeatMode = modes[idx];
+  await API.toggleRepeat(repeatMode);
+  return repeatMode;
+}
+
+export async function addToQueue(uri) {
+  return API.addToQueue(uri);
 }
 
 function showToast(msg, type = 'info') {

@@ -30,6 +30,8 @@ export async function getMe() {
 }
 
 export async function search(query, types = ['track', 'album', 'artist'], limit = 20) {
+  // Guard against short queries that Spotify rejects with 400
+  if (!query || query.length < 2) return { tracks: { items: [] }, albums: { items: [] }, artists: { items: [] } };
   const params = new URLSearchParams({ q: query, type: types.join(','), limit });
   return apiFetch(`/search?${params}`);
 }
@@ -132,4 +134,8 @@ export async function saveTrack(id) {
 
 export async function removeTrack(id) {
   return apiFetch(`/me/tracks?ids=${id}`, { method: 'DELETE' });
+}
+
+export async function addToQueue(uri) {
+  return apiFetch(`/me/player/queue?uri=${encodeURIComponent(uri)}`, { method: 'POST' });
 }
