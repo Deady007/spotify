@@ -183,7 +183,7 @@ async function showSearch(query) {
   applyPageTransition();
 
   try {
-    const data = await API.search(query, ['track', 'album', 'artist'], 12);
+    const data = await API.search(query, ['track', 'album', 'artist'], 20);
     let html = '';
 
     if (data?.tracks?.items?.length) {

@@ -37,7 +37,12 @@ export async function getMe() {
 export async function search(query, types = ['track', 'album', 'artist'], limit = 20) {
   // Guard against short queries that Spotify rejects with 400
   if (!query || query.length < 2) return { tracks: { items: [] }, albums: { items: [] }, artists: { items: [] } };
-  const params = new URLSearchParams({ q: query, type: types.join(','), limit });
+  const params = new URLSearchParams({
+    q: query,
+    type: types.join(','),
+    limit: String(limit),
+    market: 'from_token'
+  });
   return apiFetch(`/search?${params}`);
 }
 
