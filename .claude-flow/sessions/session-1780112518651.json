@@ -1,0 +1,14 @@
+{
+  "id": "session-1780112518651",
+  "startedAt": "2026-05-30T03:41:58.651Z",
+  "cwd": "/home/deadman/spotify",
+  "context": {},
+  "metrics": {
+    "edits": 3,
+    "commands": 0,
+    "tasks": 0,
+    "errors": 0
+  },
+  "endedAt": "2026-05-30T03:58:00.814Z",
+  "duration": 962165
+}

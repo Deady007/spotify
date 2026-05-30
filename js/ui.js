@@ -48,8 +48,8 @@ export function renderTrackCard(track, contextUri = null) {
   const img = getImg(track.album?.images);
   const artists = artistNames(track.artists);
   return `
-    <div class="card card--track" data-uri="${track.uri}" data-ctx="${contextUri || ''}" 
-         data-track-id="${track.id}" title="${track.name}">
+    <div class="card card--track" data-uri="${track.uri}" data-ctx="${contextUri || ''}"
+         data-track-id="${track.id}" data-artist-id="${track.artists?.[0]?.id || ''}" title="${track.name}">
       <div class="card__img-wrap">
         <img src="${img}" alt="${track.name}" loading="lazy">
         <button class="card__play-btn" data-uri="${track.uri}" data-ctx="${contextUri || ''}">
@@ -226,6 +226,11 @@ export function updateNowPlaying(state) {
 
   const playIcon = document.getElementById('np-play-icon');
   if (playIcon) playIcon.innerHTML = state.paused ? icons.play : icons.pause;
+
+  const npBar = document.getElementById('np-bar');
+  if (npBar) npBar.classList.toggle('np-bar--playing', !state.paused);
+  const fsImg = document.querySelector('.fs-np__img');
+  if (fsImg) fsImg.classList.toggle('fs-np__img--spinning', !state.paused);
 
   const pos = state.position;
   const dur = state.duration;

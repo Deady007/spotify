@@ -3,6 +3,7 @@ import { isLoggedIn, login, getAccessToken, logout } from './auth.js';
 import * as API from './spotify.js';
 import * as Player from './player.js';
 import * as UI from './ui.js';
+import { getNextTrackUris, getAnthropicKey, setAnthropicKey } from './suggestions.js';
 
 // ─── State ───────────────────────────────────────────────────────────────────
 const state = {
@@ -70,6 +71,8 @@ async function init() {
     bindFullscreenNP();
     bindInfiniteScroll();
     bindGlobalArtistLinks();
+    bindTrackRowClicks();
+    bindHeartButtons();
   } catch (e) {
     console.error(e);
     UI.showToast('Failed to load. Please try again.', 'error');
@@ -278,8 +281,6 @@ async function showLikedSongs() {
       likedTracks.innerHTML = `<div class="track-list" id="liked-track-list">${rows || '<p class="empty">No liked songs yet.</p>'}</div>`;
       likedTracks.classList.add('content-loaded');
     }
-    bindTrackRowClicks();
-    bindHeartButtons();
     if (window.__currentTrackUri) UI.highlightActiveTrack(window.__currentTrackUri);
     state.view = 'liked';
   } catch (e) {
@@ -323,8 +324,6 @@ async function showPlaylist(id) {
         ${trackItems.map((item, i) => UI.renderTrackRow(item, i, pl.uri)).join('')}
       </div>`;
     applyPageTransition();
-    bindTrackRowClicks(pl.uri);
-    bindHeartButtons();
     document.querySelector('.play-all-btn')?.addEventListener('click', () => {
       if (trackItems[0]?.track) Player.play(trackItems[0].track.uri, pl.uri);
     });
@@ -363,8 +362,6 @@ async function showAlbum(id) {
         }).join('')}
       </div>`;
     applyPageTransition();
-    bindTrackRowClicks(album.uri);
-    bindHeartButtons();
     document.querySelector('.play-all-btn')?.addEventListener('click', () => {
       if (album.tracks.items[0]) Player.play(album.tracks.items[0].uri, album.uri);
     });
@@ -391,13 +388,11 @@ async function showArtist(id) {
         </div>
       </div>
       <div id="artist-content">
-        ${UI.renderSection('Top Tracks', topTracks.tracks?.slice(0, 8).map((t, i) => UI.renderTrackRow({ track: t }, i)).join('') || '', 'section--list')}
+        ${UI.renderSection('Top Tracks', topTracks.tracks?.slice(0, 8).map((t, i) => UI.renderTrackRow({ track: t }, i, artist.uri)).join('') || '', 'section--list')}
         ${UI.renderSection('Albums', albums.items?.map(a => UI.renderAlbumCard(a)).join('') || '')}
       </div>`;
     applyPageTransition();
-    bindTrackRowClicks();
     bindCardClicks();
-    bindHeartButtons();
     if (window.__currentTrackUri) UI.highlightActiveTrack(window.__currentTrackUri);
   } catch (e) {
     UI.showToast('Failed to load artist', 'error');
@@ -408,6 +403,13 @@ async function showArtist(id) {
 function handlePlaybackState(pbState) {
   if (!pbState) return;
   state.playbackState = pbState;
+  Player.syncShuffleState(pbState.shuffle);
+  Player.syncRepeatMode(pbState.repeat_mode);
+  // Reset gapless flag when track changes
+  const uri = pbState.track_window?.current_track?.uri;
+  if (uri && window._gaplessQueued && window._gaplessQueued !== uri) {
+    window._gaplessQueued = null;
+  }
   UI.updateNowPlaying(pbState);
   startProgressTracking(pbState);
   updateShuffleRepeatUI();
@@ -430,6 +432,7 @@ function startProgressTracking(pbState) {
   if (pbState.paused) return;
   let pos = pbState.position;
   const dur = pbState.duration;
+  const trackUri = pbState.track_window?.current_track?.uri;
   window._progressInterval = setInterval(() => {
     pos += 500;
     if (pos >= dur) { clearInterval(window._progressInterval); return; }
@@ -440,12 +443,27 @@ function startProgressTracking(pbState) {
     if (bar) bar.style.width = `${pct}%`;
     if (thumb) thumb.style.left = `${pct}%`;
     if (cur) cur.textContent = UI.formatDuration(pos);
-    // Update fullscreen NP if open
     const fsFill = document.querySelector('.fs-np__progress-fill');
     const fsCur = document.querySelector('.fs-np__time-cur');
     if (fsFill) fsFill.style.width = `${pct}%`;
     if (fsCur) fsCur.textContent = UI.formatDuration(pos);
+
+    // Gapless: queue next track ~10 s before end
+    if (!window._gaplessQueued && dur > 20000 && dur - pos < 10000) {
+      window._gaplessQueued = trackUri;
+      queueGaplessNext(pbState.track_window?.current_track).catch(() => {});
+    }
   }, 500);
+}
+
+async function queueGaplessNext(track) {
+  if (!track) return;
+  const artistId = track.artists?.[0]?.id;
+  if (!artistId) return;
+  const uris = await getNextTrackUris(track, artistId);
+  for (const uri of uris.slice(0, 3)) {
+    await Player.addToQueue(uri).catch(() => {});
+  }
 }
 
 function updateShuffleRepeatUI() {
@@ -488,6 +506,13 @@ function bindNav() {
   document.getElementById('nav-library')?.addEventListener('click', e => { e.preventDefault(); showLibrary(); closeMobileMenu(); });
   document.getElementById('nav-liked')?.addEventListener('click', e => { e.preventDefault(); showLikedSongs(); closeMobileMenu(); });
   document.getElementById('nav-logout')?.addEventListener('click', e => { e.preventDefault(); logout(); });
+  document.getElementById('nav-ai-key')?.addEventListener('click', () => {
+    const current = getAnthropicKey();
+    const key = prompt('Enter Anthropic API key for AI suggestions (leave blank to use Spotify fallback):', current);
+    if (key === null) return;
+    setAnthropicKey(key);
+    UI.showToast(key ? 'AI suggestions enabled' : 'Using Spotify fallback', 'success');
+  });
 }
 
 function bindSearch() {
@@ -554,18 +579,21 @@ function bindNowPlaying() {
 
   // Volume
   const vol = document.getElementById('np-volume');
+  const setVolFill = (v) => vol?.style.setProperty('--vol-pct', `${v}%`);
   vol?.addEventListener('input', () => {
     Player.setVolume(vol.value / 100);
     UI.updateVolumeIcon(parseInt(vol.value));
+    setVolFill(vol.value);
   });
-  // Init volume icon
+  // Init volume icon + fill
   UI.updateVolumeIcon(70);
+  setVolFill(70);
 
   // Drag-to-seek on progress bar
   bindProgressDrag();
 
   // Album art click → expand fullscreen NP
-  document.getElementById('np-img')?.addEventListener('click', () => openFullscreenNP());
+  document.getElementById('np-art-clickable')?.addEventListener('click', () => openFullscreenNP());
   document.getElementById('np-expand-btn')?.addEventListener('click', () => openFullscreenNP());
 }
 
@@ -641,10 +669,17 @@ function bindCardClicks() {
     });
   });
 
-  document.querySelectorAll('[data-artist-id]').forEach(el => {
-    if (el.closest('.track-row')) return;
-    el.addEventListener('click', () => {
-      showArtist(el.dataset.artistId);
+  document.querySelectorAll('.card.card--artist').forEach(el => {
+    el.addEventListener('click', e => {
+      const id = el.dataset.artistId;
+      if (e.target.closest('.card__play-btn')) {
+        API.getArtistTopTracks(id).then(data => {
+          const first = data?.tracks?.[0];
+          if (first) Player.play(first.uri, `spotify:artist:${id}`);
+        });
+      } else {
+        showArtist(id);
+      }
     });
   });
 
@@ -652,55 +687,48 @@ function bindCardClicks() {
     el.addEventListener('click', e => {
       if (e.target.closest('.card__play-btn') || e.target.closest('.card')) {
         const uri = el.dataset.uri;
-        const ctx = el.dataset.ctx || null;
-        if (uri) Player.play(uri, ctx || null);
+        const artistId = el.dataset.artistId;
+        const ctx = el.dataset.ctx || (artistId ? `spotify:artist:${artistId}` : null);
+        if (uri) Player.play(uri, ctx);
       }
-    });
-  });
-
-  document.querySelectorAll('.artist-link').forEach(el => {
-    el.addEventListener('click', e => {
-      e.stopPropagation();
-      showArtist(el.dataset.id);
     });
   });
 }
 
-function bindTrackRowClicks(contextUri = null) {
-  document.querySelectorAll('.track-row').forEach(row => {
-    row.addEventListener('click', (e) => {
-      // Don't play if clicking heart or artist link
-      if (e.target.closest('.heart-btn') || e.target.closest('.artist-link')) return;
-      const uri = row.dataset.uri;
-      const ctx = row.dataset.ctx || contextUri || null;
-      if (uri) Player.play(uri, ctx);
-    });
+function bindTrackRowClicks() {
+  const mc = mainContent();
+  if (!mc) return;
+  mc.addEventListener('click', e => {
+    const row = e.target.closest('.track-row');
+    if (!row) return;
+    if (e.target.closest('.heart-btn') || e.target.closest('.artist-link')) return;
+    const uri = row.dataset.uri;
+    const ctx = row.dataset.ctx || null;
+    if (uri) Player.play(uri, ctx);
   });
 }
 
 function bindHeartButtons() {
-  document.querySelectorAll('.heart-btn:not(.np-heart-btn)').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const trackId = btn.dataset.trackId;
-      if (!trackId) return;
-      const isSaved = btn.classList.contains('saved');
-      try {
-        if (isSaved) {
-          await API.removeTrack(trackId);
-          btn.classList.remove('saved');
-          btn.innerHTML = UI.icons.heartOutline;
-          UI.showToast('Removed from Liked Songs', 'success');
-        } else {
-          await API.saveTrack(trackId);
-          btn.classList.add('saved');
-          btn.innerHTML = UI.icons.heartFilled;
-          UI.showToast('Added to Liked Songs', 'success');
-        }
-      } catch (e) {
-        UI.showToast('Failed to update', 'error');
+  document.body.addEventListener('click', async e => {
+    const btn = e.target.closest('.heart-btn');
+    if (!btn || btn.classList.contains('np-heart-btn')) return;
+    const trackId = btn.dataset.trackId;
+    if (!trackId) return;
+    e.stopPropagation();
+    const isSaved = btn.classList.contains('saved');
+    try {
+      if (isSaved) {
+        await API.removeTrack(trackId);
+        btn.classList.remove('saved');
+        btn.innerHTML = UI.icons.heartOutline;
+        UI.showToast('Removed from Liked Songs', 'success');
+      } else {
+        await API.saveTrack(trackId);
+        btn.classList.add('saved');
+        btn.innerHTML = UI.icons.heartFilled;
+        UI.showToast('Added to Liked Songs', 'success');
       }
-    });
+    } catch { UI.showToast('Failed to update', 'error'); }
   });
 }
 
@@ -893,8 +921,6 @@ async function loadMoreLikedSongs() {
     loader.remove();
     list.insertAdjacentHTML('beforeend', rows);
     state.likedSongsOffset += data.items.length;
-    bindTrackRowClicks();
-    bindHeartButtons();
     if (window.__currentTrackUri) UI.highlightActiveTrack(window.__currentTrackUri);
   } catch (e) {
     loader.remove();
@@ -920,8 +946,6 @@ async function loadMorePlaylistTracks() {
     loader.remove();
     list.insertAdjacentHTML('beforeend', rows);
     state.playlistTracksOffset += data.items.length;
-    bindTrackRowClicks(pl.uri);
-    bindHeartButtons();
     if (window.__currentTrackUri) UI.highlightActiveTrack(window.__currentTrackUri);
   } catch (e) {
     loader.remove();

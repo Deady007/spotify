@@ -82,6 +82,10 @@ export async function getArtistAlbums(id) {
   return apiFetch(`/artists/${id}/albums?include_groups=album,single&limit=20`);
 }
 
+export async function getRelatedArtists(id) {
+  return apiFetch(`/artists/${id}/related-artists`);
+}
+
 export async function getRecentlyPlayed(limit = 20) {
   return apiFetch(`/me/player/recently-played?limit=${limit}`);
 }

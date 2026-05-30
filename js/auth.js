@@ -74,6 +74,7 @@ export async function exchangeCode(code) {
   if (!res.ok) throw new Error('Token exchange failed');
   const data = await res.json();
   storeTokens(data);
+  localStorage.removeItem('pkce_verifier');
   return data;
 }
 

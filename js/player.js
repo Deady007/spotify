@@ -15,6 +15,15 @@ export function getDeviceId() { return deviceId; }
 export function getShuffleState() { return shuffleState; }
 export function getRepeatMode() { return repeatMode; }
 
+export function syncShuffleState(val) {
+  shuffleState = !!val;
+}
+
+export function syncRepeatMode(val) {
+  const modes = ['off', 'context', 'track'];
+  repeatMode = modes[val] ?? 'off';
+}
+
 export function initPlayer(token) {
   return new Promise((resolve) => {
     window.onSpotifyWebPlaybackSDKReady = () => {
