@@ -1,6 +1,4 @@
-// Gearbox — Track Suggestions
-// Calls Claude API if key is set in localStorage, otherwise falls back
-// to Spotify related-artists top tracks.
+// Gearbox — Claude-powered Track Suggestions
 import * as API from './spotify.js';
 
 const CLAUDE_API = 'https://api.anthropic.com/v1/messages';
@@ -14,7 +12,7 @@ export function setAnthropicKey(key) {
   localStorage.setItem('anthropic_api_key', key.trim());
 }
 
-async function claudeSuggest(trackName, artistName) {
+async function callClaude(prompt) {
   const key = getAnthropicKey();
   if (!key) return null;
 
@@ -28,11 +26,8 @@ async function claudeSuggest(trackName, artistName) {
     },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: 400,
-      messages: [{
-        role: 'user',
-        content: `I'm listening to "${trackName}" by ${artistName}. Suggest 5 similar songs. Return ONLY valid JSON array, no markdown: [{"track":"Song Name","artist":"Artist Name"}]`,
-      }],
+      max_tokens: 800,
+      messages: [{ role: 'user', content: prompt }],
     }),
   });
 
@@ -51,7 +46,7 @@ async function claudeSuggest(trackName, artistName) {
 async function fallbackSuggest(artistId) {
   try {
     const related = await API.getRelatedArtists(artistId);
-    const artists = related?.artists?.slice(0, 3) || [];
+    const artists = related?.artists?.slice(0, 5) || [];
     const results = await Promise.all(
       artists.map(a => API.getArtistTopTracks(a.id).then(d => d?.tracks?.[0]).catch(() => null))
     );
@@ -61,23 +56,39 @@ async function fallbackSuggest(artistId) {
   }
 }
 
-// Returns up to 5 Spotify track URIs to queue after the current track.
-export async function getNextTrackUris(track, artistId) {
-  const suggestions = await claudeSuggest(track.name, track.artists?.[0]?.name || '');
+// Returns full Spotify track objects for display in the queue panel.
+// count: how many tracks to suggest (default 10).
+export async function generateQueueSuggestions(track, artistId, count = 10) {
+  const trackName = track.name;
+  const artistName = track.artists?.[0]?.name || '';
+  const genre = track.artists?.[0]?.genres?.[0] || '';
+
+  const prompt = `I'm listening to "${trackName}" by ${artistName}${genre ? ` (${genre})` : ''}.
+Build me a smart queue of ${count} songs that flow naturally after this track — mix similar vibes, same energy, and a few surprising-but-fitting picks.
+Return ONLY a valid JSON array, no markdown or explanation:
+[{"track":"Song Name","artist":"Artist Name"}]`;
+
+  const suggestions = await callClaude(prompt);
 
   if (suggestions?.length) {
-    const uris = [];
-    for (const s of suggestions.slice(0, 5)) {
+    const tracks = [];
+    for (const s of suggestions.slice(0, count)) {
       try {
         const res = await API.search(`${s.track} ${s.artist}`, ['track'], 1);
-        const uri = res?.tracks?.items?.[0]?.uri;
-        if (uri) uris.push(uri);
+        const t = res?.tracks?.items?.[0];
+        if (t) tracks.push(t);
       } catch { /* skip */ }
     }
-    if (uris.length) return uris;
+    if (tracks.length) return { source: 'claude', tracks };
   }
 
-  // Fallback: related artist top tracks
+  // Fallback: related artists top tracks
   const tracks = await fallbackSuggest(artistId);
-  return tracks.map(t => t.uri).filter(Boolean);
+  return { source: 'fallback', tracks };
+}
+
+// Lightweight URI-only version used by gapless play (fires 10s before end).
+export async function getNextTrackUris(track, artistId) {
+  const result = await generateQueueSuggestions(track, artistId, 5);
+  return result.tracks.map(t => t.uri).filter(Boolean);
 }

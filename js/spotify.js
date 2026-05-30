@@ -153,3 +153,7 @@ export async function removeTrack(id) {
 export async function addToQueue(uri) {
   return apiFetch(`/me/player/queue?uri=${encodeURIComponent(uri)}`, { method: 'POST' });
 }
+
+export async function getQueue() {
+  return apiFetch('/me/player/queue');
+}

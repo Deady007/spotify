@@ -17,6 +17,7 @@ const state = {
   playlistTracksOffset: 0,
   playlistTracksTotal: 0,
   currentPlaylistId: null,
+  lastCheckedTrackId: null,
 };
 
 // ─── Elements ─────────────────────────────────────────────────────────────────
@@ -73,6 +74,7 @@ async function init() {
     bindGlobalArtistLinks();
     bindTrackRowClicks();
     bindHeartButtons();
+    bindQueuePanel();
   } catch (e) {
     console.error(e);
     UI.showToast('Failed to load. Please try again.', 'error');
@@ -414,9 +416,14 @@ function handlePlaybackState(pbState) {
   startProgressTracking(pbState);
   updateShuffleRepeatUI();
 
-  // Check if current track is saved
+  // Check if current track is saved — only when track ID changes
   const track = pbState.track_window?.current_track;
-  if (track?.id) {
+  if (track?.id && track.id !== state.lastCheckedTrackId) {
+    state.lastCheckedTrackId = track.id;
+    // Refresh queue panel if open
+    if (document.getElementById('queue-panel')?.classList.contains('open')) {
+      refreshQueue();
+    }
     API.isTrackSaved(track.id).then(saved => {
       const btn = document.getElementById('np-heart-btn');
       if (btn) {
@@ -978,6 +985,144 @@ function greeting() {
   if (h < 12) return 'morning';
   if (h < 17) return 'afternoon';
   return 'evening';
+}
+
+// ─── Queue Panel ──────────────────────────────────────────────────────────────
+function bindQueuePanel() {
+  const btn = document.getElementById('np-queue-btn');
+  const panel = document.getElementById('queue-panel');
+  const overlay = document.getElementById('queue-overlay');
+  const closeBtn = document.getElementById('queue-close-btn');
+  if (!btn || !panel) return;
+
+  const open = async () => {
+    panel.classList.add('open');
+    overlay.classList.add('active');
+    btn.classList.add('active');
+    await refreshQueue();
+  };
+  const close = () => {
+    panel.classList.remove('open');
+    overlay.classList.remove('active');
+    btn.classList.remove('active');
+  };
+
+  btn.addEventListener('click', () => panel.classList.contains('open') ? close() : open());
+  closeBtn?.addEventListener('click', close);
+  overlay.addEventListener('click', close);
+}
+
+async function refreshQueue() {
+  const body = document.getElementById('queue-body');
+  if (!body) return;
+
+  const currentTrack = state.playbackState?.track_window?.current_track;
+  if (!currentTrack) {
+    body.innerHTML = '<p class="queue-panel__empty">Nothing playing</p>';
+    return;
+  }
+
+  // Show current track immediately
+  body.innerHTML = `
+    <div class="queue-panel__section">Now Playing</div>
+    ${renderQueueTrack(currentTrack, true)}
+    <div class="queue-panel__section">AI Queue
+      <span class="queue-ai-badge">✦ Claude</span>
+    </div>
+    <div class="queue-panel__empty queue-loading">
+      <div class="queue-spinner"></div>
+      Generating smart queue…
+    </div>`;
+
+  const { generateQueueSuggestions } = await import('./suggestions.js');
+  const artistId = currentTrack.artists?.[0]?.id;
+
+  try {
+    const result = await generateQueueSuggestions(currentTrack, artistId, 10);
+    renderAiQueue(body, result);
+  } catch {
+    body.querySelector('.queue-loading').textContent = 'Failed to generate queue';
+  }
+}
+
+function renderAiQueue(body, result) {
+  const loading = body.querySelector('.queue-loading');
+  if (!result?.tracks?.length) {
+    if (loading) loading.textContent = 'No suggestions found';
+    return;
+  }
+
+  const isClaude = result.source === 'claude';
+  const label = isClaude ? '✦ Claude' : 'Related Artists';
+
+  // Update badge
+  const badge = body.querySelector('.queue-ai-badge');
+  if (badge) badge.textContent = label;
+
+  // Build track list + Queue All button
+  const tracksHtml = result.tracks.map(t => renderQueueTrack(t, false, true)).join('');
+  const queueAllHtml = `
+    <button class="queue-all-btn btn-primary" id="queue-all-btn">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
+      Queue All
+    </button>`;
+
+  if (loading) loading.outerHTML = tracksHtml + queueAllHtml;
+
+  // Bind play on click
+  body.querySelectorAll('.queue-track[data-uri]:not(.queue-track--current)').forEach(el => {
+    el.addEventListener('click', e => {
+      if (e.target.closest('.queue-track__add')) return;
+      Player.play(el.dataset.uri);
+    });
+  });
+
+  // Bind individual + buttons
+  body.querySelectorAll('.queue-track__add').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const uri = btn.dataset.uri;
+      try {
+        await Player.addToQueue(uri);
+        btn.textContent = '✓';
+        btn.disabled = true;
+        UI.showToast('Added to queue', 'success');
+      } catch {
+        UI.showToast('Failed to add', 'error');
+      }
+    });
+  });
+
+  // Queue All
+  document.getElementById('queue-all-btn')?.addEventListener('click', async () => {
+    const uris = result.tracks.map(t => t.uri).filter(Boolean);
+    const btn = document.getElementById('queue-all-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Queuing…'; }
+    for (const uri of uris) {
+      await Player.addToQueue(uri).catch(() => {});
+    }
+    if (btn) { btn.textContent = '✓ Queued'; }
+    UI.showToast(`Queued ${uris.length} tracks`, 'success');
+  });
+}
+
+function renderQueueTrack(track, isCurrent, showAdd = false) {
+  const img = track.album?.images?.[2]?.url || track.album?.images?.[0]?.url || '';
+  const artist = track.artists?.map(a => a.name).join(', ') || '';
+  const dur = UI.formatDuration(track.duration_ms);
+  const addBtn = showAdd
+    ? `<button class="queue-track__add btn-icon" data-uri="${track.uri}" title="Add to queue">+</button>`
+    : '';
+  return `
+    <div class="queue-track${isCurrent ? ' queue-track--current' : ''}" data-uri="${track.uri}">
+      <img class="queue-track__img" src="${img}" alt="">
+      <div class="queue-track__info">
+        <span class="queue-track__name">${track.name}</span>
+        <span class="queue-track__artist">${artist}</span>
+      </div>
+      <span class="queue-track__dur">${dur}</span>
+      ${addBtn}
+    </div>`;
 }
 
 // ─── Global Artist Link Delegation ────────────────────────────────────────────
