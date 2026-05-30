@@ -3,7 +3,7 @@ import { isLoggedIn, login, getAccessToken, logout } from './auth.js';
 import * as API from './spotify.js';
 import * as Player from './player.js';
 import * as UI from './ui.js';
-import { getNextTrackUris, getAnthropicKey, setAnthropicKey } from './suggestions.js';
+import { getNextTrackUris } from './suggestions.js';
 
 // ─── State ───────────────────────────────────────────────────────────────────
 const state = {
@@ -513,13 +513,6 @@ function bindNav() {
   document.getElementById('nav-library')?.addEventListener('click', e => { e.preventDefault(); showLibrary(); closeMobileMenu(); });
   document.getElementById('nav-liked')?.addEventListener('click', e => { e.preventDefault(); showLikedSongs(); closeMobileMenu(); });
   document.getElementById('nav-logout')?.addEventListener('click', e => { e.preventDefault(); logout(); });
-  document.getElementById('nav-ai-key')?.addEventListener('click', () => {
-    const current = getAnthropicKey();
-    const key = prompt('Enter Anthropic API key for AI suggestions (leave blank to use Spotify fallback):', current);
-    if (key === null) return;
-    setAnthropicKey(key);
-    UI.showToast(key ? 'AI suggestions enabled' : 'Using Spotify fallback', 'success');
-  });
 }
 
 function bindSearch() {

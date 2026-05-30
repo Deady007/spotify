@@ -1,40 +1,25 @@
 // Gearbox — Claude-powered Track Suggestions
+// Claude API calls proxied through /api/suggest (Vercel serverless function).
+// Set ANTHROPIC_API_KEY in Vercel project env vars — never exposed to the browser.
 import * as API from './spotify.js';
 
-const CLAUDE_API = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-opus-4-8';
 
-export function getAnthropicKey() {
-  return localStorage.getItem('anthropic_api_key') || '';
-}
-
-export function setAnthropicKey(key) {
-  localStorage.setItem('anthropic_api_key', key.trim());
-}
-
 async function callClaude(prompt) {
-  const key = getAnthropicKey();
-  if (!key) return null;
-
-  const res = await fetch(CLAUDE_API, {
-    method: 'POST',
-    headers: {
-      'x-api-key': key,
-      'anthropic-version': '2023-06-01',
-      'content-type': 'application/json',
-      'anthropic-dangerous-allow-browser': 'true',
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      max_tokens: 800,
-      messages: [{ role: 'user', content: prompt }],
-    }),
-  });
-
-  if (!res.ok) return null;
-  const data = await res.json();
-  const text = data?.content?.[0]?.text || '';
   try {
+    const res = await fetch('/api/suggest', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: MODEL,
+        max_tokens: 800,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+
+    if (!res.ok) return null;
+    const data = await res.json();
+    const text = data?.content?.[0]?.text || '';
     const start = text.indexOf('[');
     const end = text.lastIndexOf(']') + 1;
     return JSON.parse(text.slice(start, end));
